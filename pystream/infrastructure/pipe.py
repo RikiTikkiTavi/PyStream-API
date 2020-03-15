@@ -1,5 +1,5 @@
 from functools import reduce, partial
-from typing import Callable, List, Iterable, Any, TypeVar, Generic, Tuple, Union, Type
+from typing import Callable, List, Iterable, Any, TypeVar, Generic, Tuple, Union, Type, Optional
 
 _AT = TypeVar("_AT")
 _RT = TypeVar("_RT")
@@ -11,36 +11,13 @@ class _Empty:
     pass
 
 
-def _apply_chain_operations(
-        x: _AT,
-        /,
-        op1: Callable[[_AT], _RT],
-        op2: Callable[[_RT], _RT1]
-) -> Union[_RT1, Type[_Empty]]:
-    return op2(op1(x))
-
-
-def _identity(x):
-    return x
-
-
-def _filter(x: Union[_AT, Type[_Empty]], /, predicate: Callable[[_AT], bool]) -> Union[_AT, Type[_Empty]]:
-    # noinspection Mypy
-    return _Empty if x == _Empty or not predicate(x) else x
-
-
-def _map(x: Union[_AT, Type[_Empty]], /, mapper: Callable[[_AT], _RT]) -> Union[_RT, Type[_Empty]]:
-    # noinspection Mypy
-    return _Empty if x == _Empty else mapper(x)
-
-
 class MaybeEmpty(Generic[_AT]):
     __x: _AT
     __empty: bool
 
-    def __init__(self, x: _AT):
+    def __init__(self, x: _AT, empty=False):
         self.__x = x
-        self.__empty = False
+        self.__empty = empty
 
     def filter(self, predicate: Callable[[_AT], bool]):
         if self.__empty:
@@ -48,32 +25,54 @@ class MaybeEmpty(Generic[_AT]):
         if predicate(self.__x):
             return self
         self.__empty = True
-        del self.__x
         return self
 
-    def map(self, mapper: Callable[[_AT], _RT]):
+    def map(self, mapper: Callable[[_AT], _RT]) -> Union['MaybeEmpty[_RT]', 'MaybeEmpty[_AT]']:
         if self.__empty:
             return self
         else:
-            self.__x = mapper(self.__x)
-            return self
+            return MaybeEmpty(mapper(self.__x))
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return self.__empty
 
+    def get_x(self) -> _AT:
+        return self.__x
 
-def _init_operation(x: _AT):
+
+def _init_operation(x: _AT) -> [MaybeEmpty[_AT]]:
     return MaybeEmpty(x)
 
 
-class Pipe(Generic[_RT]):
-    __operation: Callable[[Any], _RT]
+def _apply_chain_operations(
+        x: MaybeEmpty[_AT],
+        /,
+        op1: Callable[[MaybeEmpty[_AT]], MaybeEmpty[_RT]],
+        op2: Callable[[MaybeEmpty[_RT]], MaybeEmpty[_RT1]]
+) -> MaybeEmpty[_RT1]:
+    return op2(op1(x))
 
-    def __init__(self, operation: Callable[[Any], _RT] = _identity):
+
+def _identity(x):
+    return x
+
+
+def _filter(x: MaybeEmpty[_AT], /, predicate: Callable[[_AT], bool]) -> MaybeEmpty[_AT]:
+    return x.filter(predicate)
+
+
+def _map(x: MaybeEmpty[_AT], /, mapper: Callable[[_AT], _RT]) -> Union['MaybeEmpty[_RT]', 'MaybeEmpty[_AT]']:
+    return x.map(mapper)
+
+
+class Pipe(Generic[_RT]):
+    __operation: Callable[[Any], MaybeEmpty[_RT]]
+
+    def __init__(self, operation: Callable[[Any], MaybeEmpty[_RT]] = _init_operation):
         # noinspection Mypy
         self.__operation = operation
 
-    def map(self, mapper: Callable[[_RT], _RT1]) -> "Pipe[_RT1]":
+    def map(self, mapper: Callable[[_RT], _RT1]) -> "Pipe[Union['MaybeEmpty[_RT1]', 'MaybeEmpty[_RT]']]":
         # noinspection Mypy
         return Pipe(partial(
             _apply_chain_operations,
@@ -82,7 +81,7 @@ class Pipe(Generic[_RT]):
         ))
 
     # noinspection PyMethodMayBeStatic
-    def filter(self, predicate: Callable[[_RT], bool]) -> 'Pipe[Union[_AT, _Empty]]':
+    def filter(self, predicate: Callable[[_RT], bool]) -> 'Pipe[MaybeEmpty[_RT]]':
         # noinspection Mypy
         return Pipe(partial(
             _apply_chain_operations,
@@ -90,6 +89,6 @@ class Pipe(Generic[_RT]):
             op2=partial(_filter, predicate=predicate)
         ))
 
-    def get_operation(self) -> Callable[[Any], _RT]:
+    def get_operation(self) -> Callable[[Any], MaybeEmpty[_RT]]:
         # noinspection Mypy
         return self.__operation

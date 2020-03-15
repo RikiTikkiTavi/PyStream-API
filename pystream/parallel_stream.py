@@ -58,11 +58,14 @@ class ParallelStream(Generic[_AT]):
             if len(first_pair) == 1: return first_pair[0]
             iterable = chain(first_pair, iterable)
 
-    def __filter_out_empty(self, iterable: Iterable):
-        return filter(lambda x: x != pipe._Empty, iterable)
+    def __unwrap_pipe(self, iterable: Iterable[pipe.MaybeEmpty]) -> Iterable:
+        for m in iterable:
+            if m.is_empty():
+                continue
+            yield m.get_x()
 
     def __iterator_pipe(self, pool: Pool, chunk_size: int = 1):
-        return self.__filter_out_empty(pool.imap(self.__pipe.get_operation(), self.__iterable, chunksize=chunk_size))
+        return self.__unwrap_pipe(pool.imap(self.__pipe.get_operation(), self.__iterable, chunksize=chunk_size))
 
     # ------------------------------------------------------------------------------
     # Frontends
